@@ -1,1 +1,174 @@
 
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+ content="width=device-width,initial-scale=1">
+<title>专属文案领取中心</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 20px;
+  background: #f6f6f6;
+  font-family: system-ui, sans-serif;
+}
+main {
+  max-width: 500px;
+  margin: 30px auto;
+  padding: 24px;
+  background: white;
+  border-radius: 18px;
+}
+h2, p { text-align: center; }
+p { color: #666; }
+button, select, textarea {
+  width: 100%;
+  padding: 14px;
+  margin-top: 14px;
+  font-size: 16px;
+  border-radius: 10px;
+}
+button {
+  color: white;
+  background: #222;
+  border: none;
+}
+button:disabled { opacity: .45; }
+textarea {
+  min-height: 230px;
+  border: 1px solid #ddd;
+}
+#copy { background: #18865b; }
+</style>
+</head>
+<body>
+<main>
+  <h2>✨ 专属文案领取中心</h2>
+  <p>1000种文案 · 全局不重复领取</p>
+
+  <select id="platform">
+    <option value="xhs">小红书</option>
+    <option value="moments">朋友圈</option>
+  </select>
+
+  <button id="claim">领取我的专属文案</button>
+
+  <textarea id="text" readonly
+    placeholder="领取后在这里显示文案"></textarea>
+
+  <button id="copy" disabled>一键复制</button>
+  <p id="status"></p>
+  <p>发布前请核对内容，按真实体验修改</p>
+</main>
+
+<script>
+// 换成你部署后的Cloudflare Worker地址
+const API = "https://YOUR-WORKER.workers.dev/claim";
+
+let texts = [];
+let myId = null;
+
+const claim = document.getElementById("claim");
+const copy = document.getElementById("copy");
+const platform = document.getElementById("platform");
+const output = document.getElementById("text");
+const status = document.getElementById("status");
+
+function showText() {
+  if (myId === null) return;
+
+  output.value = texts[myId][platform.value];
+  copy.disabled = false;
+  claim.disabled = true;
+  status.textContent =
+    "你的专属文案编号：" + (myId + 1);
+}
+
+async function init() {
+  claim.disabled = true;
+  status.textContent = "正在加载文案库……";
+
+  try {
+    const response = await fetch("./texts.json");
+    if (!response.ok) throw new Error("文案库加载失败");
+    texts = await response.json();
+
+    if (!Array.isArray(texts) || texts.length !== 1000)
+      throw new Error("请先配置完整的1000组文案");
+
+    for (const key of ["xhs", "moments"]) {
+      const values = texts.map(x => x[key]);
+      if (
+        values.some(x => typeof x !== "string" || !x.trim()) ||
+        new Set(values.map(x => x.trim())).size !== 1000
+      ) {
+        throw new Error("文案库含空白或重复文案：" + key);
+      }
+    }
+
+    const saved = localStorage.getItem("my_copy_id");
+    if (saved !== null) {
+      const id = Number(saved);
+      if (Number.isInteger(id) && id >= 0 && id < 1000) {
+        myId = id;
+        showText();
+        return;
+      }
+    }
+
+    status.textContent = "请选择平台并领取文案";
+    claim.disabled = false;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+claim.onclick = async () => {
+  claim.disabled = true;
+  status.textContent = "正在分配专属文案……";
+
+  try {
+    const response = await fetch(API, {
+      method: "POST"
+    });
+
+    if (response.status === 409) {
+      throw new Error("1000条文案已经领取完毕");
+    }
+    if (!response.ok) throw new Error("领取失败");
+
+    const data = await response.json();
+
+    if (!Number.isInteger(data.id) ||
+        data.id < 0 || data.id >= 1000)
+      throw new Error("收到无效文案编号");
+
+    myId = data.id;
+    localStorage.setItem("my_copy_id", String(myId));
+    showText();
+  } catch (error) {
+    status.textContent = error.message;
+    if (myId === null) claim.disabled = false;
+  }
+};
+
+platform.onchange = showText;
+
+copy.onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(output.value);
+    status.textContent = "复制成功！";
+  } catch {
+    output.focus();
+    output.select();
+    status.textContent = "请长按选中的文字复制";
+  }
+};
+
+init();
+</script>
+</body>
+</html>
+
